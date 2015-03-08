@@ -9,12 +9,12 @@ createindeaxhtml:
      - text: '<html><body>"Automation for the People"<sup>1</sup>
               </body>
               <style>
-             p.padding{padding-top: 50%;}
+             p.padding{padding-top: 50%;font-size: 70%;}
              </style>
               <footer>
               <p class="padding">
               <sup>1</sup>
-              This is probably a bit too literal, but I did not see teh reference that the superscript 1 refered to in the directions, so I added one
+              This is probably a bit too literal, but I did not see the reference that the superscript 1 refered to in the directions, so I added one
               </p>
               </footer>
               </html>'

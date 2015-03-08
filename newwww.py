@@ -45,7 +45,7 @@ def InstallSalt(instanceAddress,instanceUser, instancePassword):
 	child.logfile = sys.stdout
 	child.expect ('.*]#')
 	child.sendline ("yum install -y epel-release")
-	child.expect ('.*]#')
+	child.expect ('.*]#',timeout=210)
 	child.sendline ("yum install -y --enablerepo=saltstack-salt-el7 --enablerepo=epel salt-minion")
 	child.expect ('.*]#',timeout=210)
 	child.sendline ("sed -i 's/#file_client: remote/file_client: local/' /etc/salt/minion")
