@@ -1,0 +1,7 @@
+[saltstack-salt-el7]
+name=Copr repo for salt-el7 owned by saltstack
+baseurl=https://copr-be.cloud.fedoraproject.org/results/saltstack/salt/epel-7-$basearch/
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://copr-be.cloud.fedoraproject.org/results/saltstack/salt/pubkey.gpg
+enabled=1
