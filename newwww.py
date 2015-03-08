@@ -15,6 +15,7 @@ import os.path
 import string
 import subprocess
 import logging
+import time
 logging.basicConfig(format='%(message)s', level=logging.DEBUG)
 
 #################################################################################################
@@ -39,15 +40,15 @@ def runCommand(cmd, workingDir="./"):
 ##	purpose: installs saltstack minion on the instance, and configures it to be masterless
 ##	parameters: instanceAddress - the address of the instance we are going to configure
 ##				instanceUser - the user of the instance we are gong to configure
-##				instancePassword - the password of the instance we are gong to configure
+##				keyFile - the location of the keyfile
 ##	returns: 
 ##
 #################################################################################################
-def InstallSalt(instanceAddress,instanceUser, instancePassword):
-	cmd = ['scp', '-vvv', '-o', 'StrictHostKeyChecking=no', '-o', 'GSSAPIAuthentication=no', '-o' ,'UserKnownHostsFile=/dev/null','-i', './id_rsa','./saltstack-salt-el7-epl-7.repo' ,instanceUser+'@'+instanceAddress + ':/etc/yum.repos.d/saltstack-salt-el7-epl-7.repo']
-	scpOut, returnCode = runCommand(cmd, "./")
+def InstallSalt(instanceAddress,instanceUser, keyFile):
+	#cmd = ['scp', '-vvv', '-o', 'StrictHostKeyChecking=no', '-o', 'GSSAPIAuthentication=no', '-o' ,'UserKnownHostsFile=/dev/null','-i', keyFile,'./saltstack-salt-el7-epl-7.repo' ,instanceUser+'@'+instanceAddress + ':/etc/yum.repos.d/saltstack-salt-el7-epl-7.repo']
+	#scpOut, returnCode = runCommand(cmd, "./")
 
-	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i ./id_rsa '+instanceUser + '@' + instanceAddress)
+	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i ' +keyFile+ ' '+instanceUser + '@' + instanceAddress)
 	child.logfile = sys.stdout
 	child.expect ('.*]#')
 	child.sendline ("yum install -y epel-release")
@@ -70,7 +71,7 @@ def InstallSalt(instanceAddress,instanceUser, instancePassword):
 #################################################################################################
 def ConfigureSalt(instanceAddress,instanceUser, instancePassword):
 
-	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i ./id_rsa '+instanceUser + '@' + instanceAddress)
+	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i ' + keyFile + ' '+instanceUser + '@' + instanceAddress)
 	child.logfile = sys.stdout
 	child.expect ('.*]#')
 	child.sendline ("mkdir -p /srv/salt")
@@ -78,7 +79,7 @@ def ConfigureSalt(instanceAddress,instanceUser, instancePassword):
 	child.sendline ('exit')
 	scpFiles = ["salt/top.sls", "salt/webserver.sls", "salt/firewall.sls","salt/httpcontents.sls"]
 	for singleFile in scpFiles:
-		cmd = ['scp', '-vvv', '-o', 'StrictHostKeyChecking=no', '-o', 'GSSAPIAuthentication=no', '-o' ,'UserKnownHostsFile=/dev/null','-i', './id_rsa',singleFile ,instanceUser+'@'+instanceAddress + ':/srv/' +singleFile]
+		cmd = ['scp', '-vvv', '-o', 'StrictHostKeyChecking=no', '-o', 'GSSAPIAuthentication=no', '-o' ,'UserKnownHostsFile=/dev/null','-i', keyFile,singleFile ,instanceUser+'@'+instanceAddress + ':/srv/' +singleFile]
 		scpOut, returnCode = runCommand(cmd, "./")
 	
 #################################################################################################
@@ -92,7 +93,7 @@ def ConfigureSalt(instanceAddress,instanceUser, instancePassword):
 ##
 #################################################################################################
 def RunSalt(instanceAddress,instanceUser, instancePassword):
-	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i ./id_rsa '+instanceUser + '@' + instanceAddress)
+	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i' + keyFile + ' '+instanceUser + '@' + instanceAddress)
 	child.logfile = sys.stdout
 	child.expect ('.*]#')
 	child.sendline ("salt-call --local state.highstate")
@@ -108,6 +109,9 @@ class AWS(object):
 	vpc = None
 	subnet = None
 	subnetAddressRange = "10.10.0.0/24"
+	ec2KeyName = "ec2-newwww-key"
+	gateway = None
+	elasticIP = None
 	
 	def __init__(self, credsFilename):
 		config = ConfigParser.RawConfigParser()
@@ -141,6 +145,8 @@ class AWS(object):
 		if(self.vpcConnection == None):
 			self.vpcConnection = VPCConnection(aws_access_key_id=self.awsID, aws_secret_access_key=self.awsSecretKey)
 		self.vpc = self.vpcConnection.create_vpc(self.subnetAddressRange)
+		gateway = self.vpcConnection.create_internet_gateway()
+		self.vpcConnection.attach_internet_gateway(internet_gateway_id=gateway.id, vpc_id=self.vpc.id)
 	#################################################################################################
 	##
 	##	function: CreateSubnet
@@ -155,7 +161,18 @@ class AWS(object):
 		if(self.vpc == None):
 			self.CreateVPC()
 		self.subnet = self.vpcConnection.create_subnet(self.vpc.id, self.subnetAddressRange)
-
+	
+	#################################################################################################
+	##
+	##	function: CreateIP
+	##	purpose: allocates an elastic ip
+	##	parameters: 
+	##	returns: none
+	##
+	#################################################################################################
+	def CreateIP(self):
+		if(self.elasticIP == None):
+			self.elasticIP = self.ec2.allocate_address('vpc')
 	#################################################################################################
 	##
 	##	function: RunInstance
@@ -165,25 +182,33 @@ class AWS(object):
 	##
 	#################################################################################################
 	def RunInstance(self):
-		ec2KeyName = "ec2-newwww-key"
+		
 		#amiID = "ami-96a818fe" #this is centos7, but comes from the marketplace, 
 								#so if you haven't agreed to the marketplace agreement, you can't launch it
 		amiID = "ami-48400720" #redhat ami id
 		if(self.subnet == None):
 			self.CreateSubnet()
+		if(self.elasticIP == None):
+			self.CreateIP()
+		if(self.vpc == None):
+			self.CreateVPC()
 		
-		if( not os.path.isfile(ec2KeyName + ".pem")): 
-			logging.debug("need to create the the keypair: " + ec2KeyName)
-			key_pair = ec2.create_key_pair(ec2KeyName)
+		if( not os.path.isfile(self.ec2KeyName + ".pem")): 
+			logging.debug("need to create the the keypair: " + self.ec2KeyName)
+			key_pair = ec2.create_key_pair(self.ec2KeyName)
 			key_pair.save('./')
 		#print self.ec2.run_instances.__doc__
 		
 		reservation = self.ec2.run_instances(image_id=amiID, 
-										key_name=ec2KeyName, 
+										key_name=self.ec2KeyName, 
 										instance_type="t2.micro",
 										#security_group_ids=['sg-dfa62ebb'],
 										subnet_id=self.subnet.id
 										)
+		time.sleep(60)
+
+		#cheating since I only create 1 instance, I know it's [0]
+		self.ec2.associate_address(allocation_id=self.elasticIP.allocation_id, instance_id=reservation.instances[0].id,public_ip=self.elasticIP.public_ip)
 	#################################################################################################
 	##
 	##	function: GetCreds
@@ -195,6 +220,17 @@ class AWS(object):
 	def GetCreds(self):
 		return awsID,awsSecretKey
 
+	#################################################################################################
+	##
+	##	function: GetPemKeyFileName
+	##	purpose: gets the name of the pem key file
+	##	parameters: none
+	##	returns: a string containing the location of the pem key
+	##
+	#################################################################################################
+	def GetPemKeyFileName(self):
+		return self.ec2KeyName
+
 
 
 
@@ -205,6 +241,8 @@ parser.add_option('--creds', '--c' ,  dest='credsFile',default="aws.creds",
 options, args = parser.parse_args()
 
 aws = AWS(options.credsFile)
+#aws.CreateVPC()
+#aws.CreateIP()
 aws.RunInstance()
 #aws.RunInstance()
 #awsID,awsSecretKey = GetAWSCreds(options.credsFile)
