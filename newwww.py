@@ -2,9 +2,13 @@
 import optparse
 import sys
 import os
+import ConfigParser
 
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/pexpect_u-2.5-py3.2.egg")
 import pexpect
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)) + "/boto")
+import boto.ec2
 
 import string
 import subprocess
@@ -93,6 +97,36 @@ def RunSalt(instanceAddress,instanceUser, instancePassword):
 	child.expect ('.*]#',timeout=210)
 	child.sendline ('exit')
 
+#################################################################################################
+##
+##	function: InitAWS
+##	purpose: initializes a aws connection
+##	parameters: instanceAddress - the address of the instance we are going to configure
+##				instanceUser - the user of the instance we are gong to configure
+##				instancePassword - the password of the instance we are gong to configure
+##	returns: 
+##
+#################################################################################################
+def InitAWS():
+	logging.debug( "initting aws")
+
+#################################################################################################
+##
+##	function: GetAWSCreds
+##	purpose: gets the aws credentials from the aws.creds file
+##	parameters: credsFilename - the name of the file to read the creds from
+##	returns: 
+##
+#################################################################################################
+def GetAWSCreds(credsFilename):
+	config = ConfigParser.RawConfigParser()
+	config.read(credsFilename)
+	awsID = config.get('CredentialsSection', 'AWS_ACCESS_KEY_ID')
+	awsSecretKey = config.get('CredentialsSection', 'AWS_SECRET_ACCESS_KEY')
+
+	logging.debug("got creds file:" + credsFilename)
+	logging.debug("awsID:" + awsID)
+	logging.debug("awsSecret:" + awsSecretKey)
 
 
 parser = optparse.OptionParser(description='Create a www server in AWS')
@@ -101,7 +135,8 @@ parser.add_option('--creds', '--c' ,  dest='credsFile',default="aws.creds",
 
 options, args = parser.parse_args()
 
-#runCmd('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null root@')
-InstallSalt("192.168.1.15","root","mypassword")
-ConfigureSalt("192.168.1.15","root","mypassword")
-RunSalt("192.168.1.15","root","mypassword")
+
+GetAWSCreds(options.credsFile)
+#InstallSalt("192.168.1.15","root","mypassword")
+#ConfigureSalt("192.168.1.15","root","mypassword")
+#RunSalt("192.168.1.15","root","mypassword")

@@ -1,1 +1,3 @@
-git
+[CredentialsSection]
+AWS_ACCESS_KEY_ID=<your_aws_id>
+AWS_SECRET_ACCESS_KEY=<your_aws_secrect_key>
