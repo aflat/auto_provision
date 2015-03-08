@@ -1,3 +1,12 @@
+# sublime project
+*.sublime-*
+
+# credential files to use for git smudge
+live.aws.creds
+
+#local ssh keys to test the salt pieces, aws won't need this
+id_rsa*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
