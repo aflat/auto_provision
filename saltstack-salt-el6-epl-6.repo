@@ -1,0 +1,14 @@
+[saltstack-salt-el6]
+name=Copr repo for salt-el6 owned by saltstack
+baseurl=https://copr-be.cloud.fedoraproject.org/results/saltstack/salt/epel-6-$basearch/
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://copr-be.cloud.fedoraproject.org/results/saltstack/salt/pubkey.gpg
+enabled=1
+
+#[Optional]
+#name=Red Hat Enterprise Linux $releasever $basearch - Optional
+#baseurl=http://mrepo.dev.sabre.com/$releasever-$basearch/RPMS.optional
+#gpgcheck=1
+#file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+#enabled=1

@@ -18,6 +18,7 @@ import logging
 import time
 logging.basicConfig(format='%(message)s', level=logging.DEBUG)
 
+pexpectEndline = '.*]\$'
 #################################################################################################
 ##
 ##	function: runCommand
@@ -45,18 +46,24 @@ def runCommand(cmd, workingDir="./"):
 ##
 #################################################################################################
 def InstallSalt(instanceAddress,instanceUser, keyFile):
-	#cmd = ['scp', '-vvv', '-o', 'StrictHostKeyChecking=no', '-o', 'GSSAPIAuthentication=no', '-o' ,'UserKnownHostsFile=/dev/null','-i', keyFile,'./saltstack-salt-el7-epl-7.repo' ,instanceUser+'@'+instanceAddress + ':/etc/yum.repos.d/saltstack-salt-el7-epl-7.repo']
-	#scpOut, returnCode = runCommand(cmd, "./")
+	cmd = ['scp', '-vvv', '-o', 'StrictHostKeyChecking=no', '-o', 'GSSAPIAuthentication=no', '-o' ,'UserKnownHostsFile=/dev/null','-i', keyFile,'./saltstack-salt-el6-epl-6.repo' ,instanceUser+'@'+instanceAddress + ':/home/ec2-user/saltstack-salt-el6-epl-6.repo']
+	scpOut, returnCode = runCommand(cmd, "./")
 
 	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i ' +keyFile+ ' '+instanceUser + '@' + instanceAddress)
 	child.logfile = sys.stdout
-	child.expect ('.*]#')
-	child.sendline ("yum install -y epel-release")
-	child.expect ('.*]#',timeout=210)
-	child.sendline ("yum install -y --enablerepo=saltstack-salt-el7 --enablerepo=epel salt-minion")
-	child.expect ('.*]#',timeout=210)
-	child.sendline ("sed -i 's/#file_client: remote/file_client: local/' /etc/salt/minion")
-	child.expect ('.*]#')
+	child.expect (pexpectEndline)
+	child.sendline ("wget http://download.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-8.noarch.rpm")
+	child.expect (pexpectEndline,timeout=210)
+	child.sendline ("sudo rpm -ivh epel-release-6-8.noarch.rpm")
+	child.expect (pexpectEndline,timeout=210)
+	child.sendline ("sudo mv /home/ec2-user/saltstack-salt-el6-epl-6.repo /etc/yum.repos.d/saltstack-salt-el6-epl-6.repo")
+	child.expect (pexpectEndline)
+	child.sendline ("sudo yum clean dbcache")
+	child.expect (pexpectEndline)
+	child.sendline ("sudo yum install -y --enablerepo=saltstack-salt-el6 --enablerepo=epel --enablerepo=rhui-REGION-rhel-server-releases-optional salt-minion")
+	child.expect (pexpectEndline,timeout=210)
+	child.sendline ("sudo sed -i 's/#file_client: remote/file_client: local/' /etc/salt/minion")
+	child.expect (pexpectEndline)
 	child.sendline ('exit')
 
 #################################################################################################
@@ -69,13 +76,15 @@ def InstallSalt(instanceAddress,instanceUser, keyFile):
 ##	returns: 
 ##
 #################################################################################################
-def ConfigureSalt(instanceAddress,instanceUser, instancePassword):
+def ConfigureSalt(instanceAddress,instanceUser, keyFile):
 
 	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i ' + keyFile + ' '+instanceUser + '@' + instanceAddress)
 	child.logfile = sys.stdout
-	child.expect ('.*]#')
-	child.sendline ("mkdir -p /srv/salt")
-	child.expect ('.*]#')
+	child.expect (pexpectEndline)
+	child.sendline ("sudo mkdir -p /srv/salt")
+	child.expect (pexpectEndline)
+	child.sendline ("sudo chmod 777 /srv/salt")
+	child.expect (pexpectEndline)
 	child.sendline ('exit')
 	scpFiles = ["salt/top.sls", "salt/webserver.sls", "salt/firewall.sls","salt/httpcontents.sls"]
 	for singleFile in scpFiles:
@@ -92,12 +101,12 @@ def ConfigureSalt(instanceAddress,instanceUser, instancePassword):
 ##	returns: 
 ##
 #################################################################################################
-def RunSalt(instanceAddress,instanceUser, instancePassword):
+def RunSalt(instanceAddress,instanceUser, keyFile):
 	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i' + keyFile + ' '+instanceUser + '@' + instanceAddress)
 	child.logfile = sys.stdout
-	child.expect ('.*]#')
-	child.sendline ("salt-call --local state.highstate")
-	child.expect ('.*]#',timeout=210)
+	child.expect (pexpectEndline)
+	child.sendline ("sudo salt-call --local state.highstate")
+	child.expect (pexpectEndline,timeout=210)
 	child.sendline ('exit')
 
 class AWS(object):
@@ -112,6 +121,7 @@ class AWS(object):
 	ec2KeyName = "ec2-newwww-key"
 	gateway = None
 	elasticIP = None
+	runningInstance = None
 	
 	def __init__(self, credsFilename):
 		config = ConfigParser.RawConfigParser()
@@ -178,7 +188,7 @@ class AWS(object):
 	##	function: RunInstance
 	##	purpose: initializes a aws connection
 	##	parameters: 
-	##	returns: 
+	##	returns: the ip of the instance
 	##
 	#################################################################################################
 	def RunInstance(self):
@@ -199,16 +209,19 @@ class AWS(object):
 			key_pair.save('./')
 		#print self.ec2.run_instances.__doc__
 		
-		reservation = self.ec2.run_instances(image_id=amiID, 
+		self.runningInstance = self.ec2.run_instances(image_id=amiID, 
 										key_name=self.ec2KeyName, 
 										instance_type="t2.micro",
 										#security_group_ids=['sg-dfa62ebb'],
 										subnet_id=self.subnet.id
 										)
+		#make sure you sleep before associating the IP, AWS can fail if you don't, 60 seconds might be too long, but it's a safe number
 		time.sleep(60)
 
 		#cheating since I only create 1 instance, I know it's [0]
-		self.ec2.associate_address(allocation_id=self.elasticIP.allocation_id, instance_id=reservation.instances[0].id,public_ip=self.elasticIP.public_ip)
+		self.ec2.associate_address(allocation_id=self.elasticIP.allocation_id, instance_id=self.runningInstance.instances[0].id,public_ip=self.elasticIP.public_ip)
+		#return self.elasticIP.public_ip
+		return self.runningInstance
 	#################################################################################################
 	##
 	##	function: GetCreds
@@ -230,6 +243,19 @@ class AWS(object):
 	#################################################################################################
 	def GetPemKeyFileName(self):
 		return self.ec2KeyName
+	#################################################################################################
+	##
+	##	function: CheckInstanceStatus
+	##	purpose: checks the status of the instance we just started, so we can tell when it is running
+	##	parameters: none
+	##	returns: a string - the status of the instance
+	##
+	#################################################################################################
+	def CheckInstanceState(self):
+
+		#print self.ec2.__doc__
+		print self.runningInstance.instances[0].__doc__
+		return self.runningInstance.instances[0].state
 
 
 
@@ -239,14 +265,31 @@ parser.add_option('--creds', '--c' ,  dest='credsFile',default="aws.creds",
 	help='a file containing your aws credentials file, if not supplied it looks for aws.creds')
 
 options, args = parser.parse_args()
-
+InstallSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
+ConfigureSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
+RunSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
+exit(0)
 aws = AWS(options.credsFile)
 #aws.CreateVPC()
 #aws.CreateIP()
-aws.RunInstance()
+#aws.CheckInstanceState()
+#exit(0)
+runningInstance = aws.RunInstance()
+print runningInstance.instances[0].ip_address
+for x in range(0, 10):
+	currentStatus = aws.CheckInstanceState()
+	if(currentStatus == "running"):
+		logging.info("Instance is running, moving on to configuration")
+		break
+	logging.info("Waiting for the instance to be running, current status is "+currentStatus+", check "+ str(x) + " of 10")
+	if ( x == 9):
+		logging.error("ERROR: failed while waiting for instance to be running")
+	time.sleep(15)
+
+print "All done!!!!!!!!!"
 #aws.RunInstance()
 #awsID,awsSecretKey = GetAWSCreds(options.credsFile)
 #RunAWSInstance(awsID, awsSecretKey)
-#InstallSalt("192.168.1.15","root","mypassword")
-#ConfigureSalt("192.168.1.15","root","mypassword")
-#RunSalt("192.168.1.15","root","mypassword")
+#InstallSalt(publicIP,"root","mypassword")
+#ConfigureSalt(publicIP,"root","mypassword")
+#RunSalt(publicIP,"root","mypassword")
