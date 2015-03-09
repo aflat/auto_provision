@@ -259,7 +259,7 @@ class AWS(object):
 		
 		if( not os.path.isfile(self.ec2KeyName + ".pem")): 
 			logging.debug("need to create the the keypair: " + self.ec2KeyName)
-			key_pair = ec2.create_key_pair(self.ec2KeyName)
+			key_pair = self.ec2.create_key_pair(self.ec2KeyName)
 			key_pair.save('./')
 		#print self.ec2.run_instances.__doc__
 		
@@ -335,7 +335,8 @@ aws = AWS(options.credsFile)
 runningInstance = aws.RunInstance()
 aws.ModifyRouteTable()
 aws.ModifySecurityGroup()
-
+#I really need to check the status rather then sleeping, but it will work for now
+time.sleep(60)
 
 InstallSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
 ConfigureSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
