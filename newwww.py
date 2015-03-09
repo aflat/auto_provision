@@ -204,8 +204,6 @@ class AWS(object):
 		self.routeTable = self.vpcConnection.get_all_route_tables(filters={ 'vpc_id': self.vpc.id })[0]
 		self.vpcConnection.create_route(route_table_id=self.routeTable.id, destination_cidr_block="0.0.0.0/0",gateway_id=self.gateway.id)
 		
-		#self.routeTable	= self.vpcConnection.create_route_table(self.vpc.id)
-	
 	#################################################################################################
 	##
 	##	function: ModifySecurityGroup
@@ -332,10 +330,7 @@ parser.add_option('--creds', '--c' ,  dest='credsFile',default="aws.creds",
 	help='a file containing your aws credentials file, if not supplied it looks for aws.creds')
 
 options, args = parser.parse_args()
-# InstallSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
-# ConfigureSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
-# RunSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
-# exit(0)
+
 aws = AWS(options.credsFile)
 runningInstance = aws.RunInstance()
 aws.ModifyRouteTable()
@@ -346,28 +341,4 @@ InstallSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
 ConfigureSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
 RunSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
 
-#aws.CreateRouteTable()
-#aws.CreateSubnet()
-
-#aws.CreateIP()
-#aws.CheckInstanceState()
-#exit(0)
-#runningInstance = aws.RunInstance()
-# print runningInstance.instances[0].ip_address
-# for x in range(0, 10):
-# 	currentStatus = aws.CheckInstanceState()
-# 	if(currentStatus == "running"):
-# 		logging.info("Instance is running, moving on to configuration")
-# 		break
-# 	logging.info("Waiting for the instance to be running, current status is "+currentStatus+", check "+ str(x) + " of 10")
-# 	if ( x == 9):
-# 		logging.error("ERROR: failed while waiting for instance to be running")
-# 	time.sleep(15)
-
-# print "All done!!!!!!!!!"
-#aws.RunInstance()
-#awsID,awsSecretKey = GetAWSCreds(options.credsFile)
-#RunAWSInstance(awsID, awsSecretKey)
-#InstallSalt(publicIP,"root","mypassword")
-#ConfigureSalt(publicIP,"root","mypassword")
-#RunSalt(publicIP,"root","mypassword")
+logging.info("You can find the page at http://"+aws.GetPublicIP())
