@@ -58,6 +58,7 @@ def InstallSalt(instanceAddress,instanceUser, keyFile):
 	child.expect (pexpectEndline,timeout=210)
 	child.sendline ("sudo mv /home/ec2-user/saltstack-salt-el6-epl-6.repo /etc/yum.repos.d/saltstack-salt-el6-epl-6.repo")
 	child.expect (pexpectEndline)
+	#there is a bug in the epel repo that gets installed on rhel6, so clean the cache so we can continue
 	child.sendline ("sudo yum clean dbcache")
 	child.expect (pexpectEndline)
 	child.sendline ("sudo yum install -y --enablerepo=saltstack-salt-el6 --enablerepo=epel --enablerepo=rhui-REGION-rhel-server-releases-optional salt-minion")
@@ -122,6 +123,7 @@ class AWS(object):
 	gateway = None
 	elasticIP = None
 	runningInstance = None
+	routeTable = None
 	
 	def __init__(self, credsFilename):
 		config = ConfigParser.RawConfigParser()
@@ -155,8 +157,8 @@ class AWS(object):
 		if(self.vpcConnection == None):
 			self.vpcConnection = VPCConnection(aws_access_key_id=self.awsID, aws_secret_access_key=self.awsSecretKey)
 		self.vpc = self.vpcConnection.create_vpc(self.subnetAddressRange)
-		gateway = self.vpcConnection.create_internet_gateway()
-		self.vpcConnection.attach_internet_gateway(internet_gateway_id=gateway.id, vpc_id=self.vpc.id)
+		self.gateway = self.vpcConnection.create_internet_gateway()
+		self.vpcConnection.attach_internet_gateway(internet_gateway_id=self.gateway.id, vpc_id=self.vpc.id)
 	#################################################################################################
 	##
 	##	function: CreateSubnet
@@ -171,7 +173,61 @@ class AWS(object):
 		if(self.vpc == None):
 			self.CreateVPC()
 		self.subnet = self.vpcConnection.create_subnet(self.vpc.id, self.subnetAddressRange)
+	#################################################################################################
+	##
+	##	function: CreateRouteTable
+	##	purpose: creates a routetable, with the correct public IP routable
+	##	parameters: 
+	##	returns: 
+	##
+	#################################################################################################
+	def CreateRouteTable(self):
+		if(self.vpcConnection == None):
+			self.vpcConnection = VPCConnection(aws_access_key_id=self.awsID, aws_secret_access_key=self.awsSecretKey)
+		if(self.vpc == None):
+			self.CreateVPC()
+		self.routeTable	= self.vpcConnection.create_route_table(self.vpc.id)
+
+	#################################################################################################
+	##
+	##	function: ModifyRouteTable
+	##	purpose: edits the routetable associated with the VPC, to open up all traffic(security hole of course)
+	##	parameters: 
+	##	returns: 
+	##
+	#################################################################################################
+	def ModifyRouteTable(self):
+		if(self.vpcConnection == None):
+			self.vpcConnection = VPCConnection(aws_access_key_id=self.awsID, aws_secret_access_key=self.awsSecretKey)
+		if(self.vpc == None):
+			self.CreateVPC()
+		self.routeTable = self.vpcConnection.get_all_route_tables(filters={ 'vpc_id': self.vpc.id })[0]
+		self.vpcConnection.create_route(route_table_id=self.routeTable.id, destination_cidr_block="0.0.0.0/0",gateway_id=self.gateway.id)
+		
+		#self.routeTable	= self.vpcConnection.create_route_table(self.vpc.id)
 	
+	#################################################################################################
+	##
+	##	function: ModifySecurityGroup
+	##	purpose: edits the security group associated with the VPC, to open up all traffic(security hole of course)
+	##	parameters: 
+	##	returns: 
+	##
+	#################################################################################################
+	def ModifySecurityGroup(self):
+		
+		securityGroup = self.ec2.get_all_security_groups(filters={ 'vpc_id': self.vpc.id })[0]
+		self.ec2.authorize_security_group(group_id=securityGroup.id,
+											from_port="22",
+											to_port="22",
+											cidr_ip="0.0.0.0/0",
+											ip_protocol="tcp")
+		self.ec2.authorize_security_group(group_id=securityGroup.id,
+											from_port="80",
+											to_port="80",
+											cidr_ip="0.0.0.0/0",
+											ip_protocol="tcp")
+		
 	#################################################################################################
 	##
 	##	function: CreateIP
@@ -243,6 +299,17 @@ class AWS(object):
 	#################################################################################################
 	def GetPemKeyFileName(self):
 		return self.ec2KeyName
+
+	#################################################################################################
+	##
+	##	function: GetPublicIP
+	##	purpose: gets the public IP of the instance we just created
+	##	parameters: none
+	##	returns: a string containing the location of the pem key
+	##
+	#################################################################################################
+	def GetPublicIP(self):
+		return self.elasticIP.public_ip
 	#################################################################################################
 	##
 	##	function: CheckInstanceStatus
@@ -265,28 +332,39 @@ parser.add_option('--creds', '--c' ,  dest='credsFile',default="aws.creds",
 	help='a file containing your aws credentials file, if not supplied it looks for aws.creds')
 
 options, args = parser.parse_args()
-InstallSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
-ConfigureSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
-RunSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
-exit(0)
+# InstallSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
+# ConfigureSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
+# RunSalt("54.172.73.65","ec2-user","ec2-newwww-key.pem")
+# exit(0)
 aws = AWS(options.credsFile)
-#aws.CreateVPC()
+runningInstance = aws.RunInstance()
+aws.ModifyRouteTable()
+aws.ModifySecurityGroup()
+
+
+InstallSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
+ConfigureSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
+RunSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
+
+#aws.CreateRouteTable()
+#aws.CreateSubnet()
+
 #aws.CreateIP()
 #aws.CheckInstanceState()
 #exit(0)
-runningInstance = aws.RunInstance()
-print runningInstance.instances[0].ip_address
-for x in range(0, 10):
-	currentStatus = aws.CheckInstanceState()
-	if(currentStatus == "running"):
-		logging.info("Instance is running, moving on to configuration")
-		break
-	logging.info("Waiting for the instance to be running, current status is "+currentStatus+", check "+ str(x) + " of 10")
-	if ( x == 9):
-		logging.error("ERROR: failed while waiting for instance to be running")
-	time.sleep(15)
+#runningInstance = aws.RunInstance()
+# print runningInstance.instances[0].ip_address
+# for x in range(0, 10):
+# 	currentStatus = aws.CheckInstanceState()
+# 	if(currentStatus == "running"):
+# 		logging.info("Instance is running, moving on to configuration")
+# 		break
+# 	logging.info("Waiting for the instance to be running, current status is "+currentStatus+", check "+ str(x) + " of 10")
+# 	if ( x == 9):
+# 		logging.error("ERROR: failed while waiting for instance to be running")
+# 	time.sleep(15)
 
-print "All done!!!!!!!!!"
+# print "All done!!!!!!!!!"
 #aws.RunInstance()
 #awsID,awsSecretKey = GetAWSCreds(options.credsFile)
 #RunAWSInstance(awsID, awsSecretKey)
