@@ -44,6 +44,8 @@ Options:
 
 A couple of notes:
 
+0. I have only run this on linux. Mine is a Mint machine, but it should run on most linux flavors
+
 0. I have only tested on python 2.7, but in theory it should work in 3.3
 
 0. You need a creds file, with the following contents:
@@ -59,3 +61,6 @@ python newwww.py --p /home/gstockfisch/.ssh/mylocalkey.pem
 will use the .pem file there for the ssh/scp calls, but the aws key pair must be "mylocalkey". If you don't supply a .pem file, the script will create one, as well as the key pair
 
 
+##Overview
+
+The script is python of course. Using the aws boto api(which is the submodule). I also use pexpect, imported as an egg to make calls into the machine. I chose to use Saltstack to do the web config, since you can run it in masterless mode. I tested the Salt pieces in a VM running centos initially, but found that the centos AMI is from the marketplace, this means if you haven't agreed to the marketplace agreement, you can't use it(and the api calls let you know). So for compatability reasons(with what I had done initially) I chose the Redhat AMI. All testing to see if the machine is up is just done by checking if we get a 200 return code, there is no content checking done. 

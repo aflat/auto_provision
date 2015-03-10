@@ -1,3 +1,4 @@
+#!/usr/bin/python
 
 import optparse
 import sys
@@ -38,6 +39,7 @@ def runCommand(cmd, workingDir="./"):
 
 ######Import the aws boto package, 
 if(not os.path.isfile(os.path.dirname(os.path.realpath(__file__)) + "/boto/setup.py")):
+	logging.info("Boto module not found, git cloning it in...this may take a minute")
 	cmd = ['git', 'submodule', 'update', '--init', '--recursive']
 	gitOut, returnCode = runCommand(cmd, "./")
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)) + "/boto")
@@ -50,26 +52,35 @@ from boto.vpc import VPCConnection
 ##	purpose: installs saltstack minion on the instance, and configures it to be masterless
 ##	parameters: instanceAddress - the address of the instance we are going to configure
 ##				instanceUser - the user of the instance we are gong to configure
-##				keyFile - the location of the keyfile
+##				keyFile - the location of the keyfile(.pem file)
 ##	returns: 
 ##
 #################################################################################################
 def InstallSalt(instanceAddress,instanceUser, keyFile):
+	#we need to add the saltstack .repo file, so we can do the easy yum install later
 	cmd = ['scp', '-vvv', '-o', 'StrictHostKeyChecking=no', '-o', 'GSSAPIAuthentication=no', '-o' ,'UserKnownHostsFile=/dev/null','-i', keyFile,'./saltstack-salt-el6-epl-6.repo' ,instanceUser+'@'+instanceAddress + ':/home/ec2-user/saltstack-salt-el6-epl-6.repo']
 	scpOut, returnCode = runCommand(cmd, "./")
 
+	#spawn an expect session so we can send commands through ssh
 	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i ' +keyFile+ ' '+instanceUser + '@' + instanceAddress)
 	child.logfile = sys.stdout
 	child.expect (pexpectEndline)
+
+	#salstack needs some extra rpm dependencies located in the epel repo, so download it and install it
 	child.sendline ("wget http://download.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-8.noarch.rpm")
 	child.expect (pexpectEndline,timeout=210)
 	child.sendline ("sudo rpm -ivh epel-release-6-8.noarch.rpm")
 	child.expect (pexpectEndline,timeout=210)
+
+	#we can't scp as root into the instance, so it's initially scp'd in as the ec2-user, then once we are ssh'd in we can copy it to the right location
 	child.sendline ("sudo mv /home/ec2-user/saltstack-salt-el6-epl-6.repo /etc/yum.repos.d/saltstack-salt-el6-epl-6.repo")
 	child.expect (pexpectEndline)
+
 	#there is a bug in the epel repo that gets installed on rhel6, so clean the cache so we can continue
 	child.sendline ("sudo yum clean dbcache")
 	child.expect (pexpectEndline)
+
+	#finally, install saltstack, as a minion only
 	child.sendline ("sudo yum install -y --enablerepo=saltstack-salt-el6 --enablerepo=epel --enablerepo=rhui-REGION-rhel-server-releases-optional salt-minion")
 	child.expect (pexpectEndline,timeout=210)
 	child.sendline ("sudo sed -i 's/#file_client: remote/file_client: local/' /etc/salt/minion")
@@ -96,6 +107,7 @@ def ConfigureSalt(instanceAddress,instanceUser, keyFile):
 	child.sendline ("sudo chmod 777 /srv/salt")
 	child.expect (pexpectEndline)
 	child.sendline ('exit')
+	#these are all the salt state files that need to be copied in, once we exec salt it will look at them
 	scpFiles = ["salt/top.sls", "salt/webserver.sls", "salt/firewall.sls","salt/httpcontents.sls"]
 	for singleFile in scpFiles:
 		cmd = ['scp', '-vvv', '-o', 'StrictHostKeyChecking=no', '-o', 'GSSAPIAuthentication=no', '-o' ,'UserKnownHostsFile=/dev/null','-i', keyFile,singleFile ,instanceUser+'@'+instanceAddress + ':/srv/' +singleFile]
@@ -115,10 +127,18 @@ def RunSalt(instanceAddress,instanceUser, keyFile):
 	child = pexpect.spawn ('ssh -o StrictHostKeyChecking=no -o GSSAPIAuthentication=no -o UserKnownHostsFile=/dev/null -i' + keyFile + ' '+instanceUser + '@' + instanceAddress)
 	child.logfile = sys.stdout
 	child.expect (pexpectEndline)
+
+	#this just runs salt, which will check the state files we copied in earlier
 	child.sendline ("sudo salt-call --local state.highstate")
 	child.expect (pexpectEndline,timeout=210)
 	child.sendline ('exit')
 
+
+#################################################################################################
+##
+##	Class: AWS
+##
+#################################################################################################
 class AWS(object):
 	credsFilename = "aws.creds"
 	awsID = ""
@@ -136,6 +156,14 @@ class AWS(object):
 	ec2KeyPath = None
 	instanceTagName = "ec2_newwww_tag"
 	
+	#################################################################################################
+	##
+	##	function: __init__
+	##	purpose: sets up the initial connection to aws, since all the aws calls need it
+	##	parameters: credsFilename - a string which contains the path to the creds file
+	##	returns: none
+	##
+	#################################################################################################
 	def __init__(self, credsFilename):
 		if( not os.path.isfile(credsFilename) ):
 			logging.error("Error: creds file"+credsFilename+ "is missing!!!! exiting ")
@@ -146,9 +174,9 @@ class AWS(object):
 		self.awsSecretKey = config.get('CredentialsSection', 'AWS_SECRET_ACCESS_KEY')
 
 		
-		logging.debug("got creds file:" + credsFilename)
-		logging.debug("awsID:" + self.awsID)
-		logging.debug("awsSecret:" + self.awsSecretKey)
+		logging.debug("Using creds file:" + credsFilename)
+		#logging.debug("awsID:" + self.awsID)
+		#logging.debug("awsSecret:" + self.awsSecretKey)
 		if( len(self.awsID) == 0 or len(self.awsSecretKey) == 0):
 			logging.error("ERROR: You must provide your AWS crendentials in the file " + credsFilename)
 			sys.exit(1)
@@ -162,8 +190,9 @@ class AWS(object):
 	#################################################################################################
 	##
 	##	function: CreateVPC
-	##	purpose: creates the vpc
-	##	parameters: 
+	##	purpose: creates the vpc, using the subnet address range given in self.subnetAddressRange. It also creates the 
+	##				internet gateway, and attaches that gateway to the vpc
+	##	parameters: none
 	##	returns: none
 	##
 	#################################################################################################
@@ -176,9 +205,9 @@ class AWS(object):
 	#################################################################################################
 	##
 	##	function: CreateSubnet
-	##	purpose: creates a subnet
-	##	parameters: 
-	##	returns: the subnet object
+	##	purpose: creates a subnet, using the subnet address range self.subnetAddressRange
+	##	parameters: none
+	##	returns: none
 	##
 	#################################################################################################
 	def CreateSubnet(self):
@@ -191,8 +220,8 @@ class AWS(object):
 	##
 	##	function: CreateRouteTable
 	##	purpose: creates a routetable, with the correct public IP routable
-	##	parameters: 
-	##	returns: 
+	##	parameters: none
+	##	returns: none
 	##
 	#################################################################################################
 	def CreateRouteTable(self):
@@ -206,8 +235,8 @@ class AWS(object):
 	##
 	##	function: ModifyRouteTable
 	##	purpose: edits the routetable associated with the VPC, to open up all traffic(security hole of course)
-	##	parameters: 
-	##	returns: 
+	##	parameters: none
+	##	returns: none
 	##
 	#################################################################################################
 	def ModifyRouteTable(self):
@@ -221,9 +250,10 @@ class AWS(object):
 	#################################################################################################
 	##
 	##	function: ModifySecurityGroup
-	##	purpose: edits the security group associated with the VPC, to open up all traffic(security hole of course)
-	##	parameters: 
-	##	returns: 
+	##	purpose: edits the security group associated with the VPC, to open up all traffic(security hole of course) 
+	##				so all ip addresses hitting port 80 and 22 are accepted
+	##	parameters: none
+	##	returns: none
 	##
 	#################################################################################################
 	def ModifySecurityGroup(self):
@@ -244,7 +274,7 @@ class AWS(object):
 	##
 	##	function: CreateIP
 	##	purpose: allocates an elastic ip
-	##	parameters: 
+	##	parameters: none
 	##	returns: none
 	##
 	#################################################################################################
@@ -254,9 +284,12 @@ class AWS(object):
 	#################################################################################################
 	##
 	##	function: RunInstance
-	##	purpose: initializes a aws connection
-	##	parameters: 
-	##	returns: the ip of the instance
+	##	purpose: this gets the instance running. it makes sure the subnet and vpc are created so it can attach them
+	##				to the instance. It will wait for the instance to go to the running state, and then it will 
+	##				attach the elastic IP. Trying to do that too early in instance creation can cause a failure
+	##				After that, it creates a couple of tags for the instance, so we can look them up later when we do tests
+	##	parameters: none
+	##	returns: bot.ec2.instance.Reservation object
 	##
 	#################################################################################################
 	def RunInstance(self):
@@ -286,9 +319,10 @@ class AWS(object):
 		#make sure you sleep before associating the IP, AWS can fail if you don't
 		instanceStatus = self.runningInstance.instances[0].update()
 		while instanceStatus == 'pending':
-			logging.info("Instance is still pending, waiting for it to move on from that state...")
+			logging.info("Instance is still pending, waiting(10 seconds) for it to move on from that state...")
 			time.sleep(10)
 			instanceStatus = self.runningInstance.instances[0].update()
+
 		#make sure you wait before associating the IP, AWS can fail if you don't
 		instanceStatus = self.runningInstance.instances[0].update()
 		while instanceStatus != 'running':
@@ -296,6 +330,7 @@ class AWS(object):
 			time.sleep(10)
 			instanceStatus = self.runningInstance.instances[0].update()
 
+		#Name the instance we just started, and create a tag with the current timestamp, so we can search for it later when we run tests
 		self.ec2.create_tags(resource_ids=[self.runningInstance.instances[0].id], tags={"Name": self.instanceTagName,
 																	"EpochDateCreated":str(time.time())})   
 		#cheating since I only create 1 instance, I know it's [0]
@@ -316,7 +351,11 @@ class AWS(object):
 			logging.error("Failed to get any instance with a tag Name of: " + self.instanceTagName + " I can't run a test")
 			return 1
 
+		#we should have at least 1 instance, so we can assign that now
 		latestReservation = [allInstances[0].id,allInstances[0].tags["EpochDateCreated"],allInstances[0].ip_address]
+
+		#the iterate through all the instances that have the right name, and see which one is newest, 
+		#I'm assuming the newest one is the one we want to test, the others might just be terminated
 		for singleInstance in allInstances:
 			if(singleInstance.tags["EpochDateCreated"] > latestReservation[1]):
 				latestReservation = [singleInstance.id, singleInstance.tags["EpochDateCreated"],singleInstance.ip_address]
@@ -356,12 +395,17 @@ class AWS(object):
 	#################################################################################################
 	##
 	##	function: SetKeyName
-	##	purpose: sets the keyname we are going to use to connect to the instance with, 
+	##	purpose: sets the keyname(the aws "Key Pair"), and path(to the local .pem file) we are going to use to connect to the instance with, 
 	##	parameters: none
 	##	returns: 
 	##
 	#################################################################################################
 	def SetKeyNameAndPath(self, keyPath="ec2-newwww-key.pem"):
+		
+		if(os.path.splitext( os.path.basename(keyPath))[1] != ".pem" and not os.path.isfile(keyPath)):
+			logging.error("ERROR: your .pem file doesn't exist, and the filename you supplied doesn't end in .pem, you need to" +
+				" either supply an existing filename, or pass in a filename with a .pem extension, exiting")
+			exit(1)
 		self.ec2KeyName = os.path.splitext( os.path.basename(keyPath))[0]
 		self.ec2KeyPath = keyPath
 		
@@ -379,6 +423,10 @@ class AWS(object):
 		print self.runningInstance.instances[0].__doc__
 		return self.runningInstance.instances[0].state
 
+######END of AWS class
+
+
+
 #################################################################################################
 ##
 ##	function: TestURL
@@ -395,6 +443,8 @@ def TestURL(url):
 	logging.error("URL: " + url + " is NOT up there was an error somewhere")
 	return 1
 
+
+#####Main
 
 parser = optparse.OptionParser(description='Create a www server in AWS')
 parser.add_option('--creds', '--c' ,  dest='credsFile',default="aws.creds",
@@ -428,8 +478,9 @@ aws.SetKeyNameAndPath(options.pemName)
 runningInstance = aws.RunInstance()
 aws.ModifyRouteTable()
 aws.ModifySecurityGroup()
-#There isn't much of a way to make sure the OS is running(since the aws class already knows it's in a running state),
-#so I'm coping out and sleeping, 60 seconds might be long, but it's 
+#There isn't much of a way to make sure the OS is running(since the AWS class already knows it's in a running state),
+#so I'm coping out and sleeping, 60 seconds might be long, but it works. I could try to ping, 
+#or ssh until it doesn't timeout, but that can hit it's own issues 
 logging.info("Going to wait 60 seconds for the OS in the instance to start up")
 for x in range(1,7):
 	logging.info("I'm not hung, sleep cycle(10 seconds each) " + str(x) + " of 6")
