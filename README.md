@@ -1,7 +1,7 @@
 # auto_provision
 
 
-Usage
+##Usage
 ******
 
 You can use 
@@ -13,14 +13,14 @@ since there is a required submodule, if not, the script will clone for you, hope
 git submodule update --init --recursive
 ```
 
-Running the script
+##Running the script
 *****
 
 ```
 newwww.py --help
 ```
  will get you the latest help, but here is a copy just in case:
-
+```
 Usage: newwww.py [options]
 
 Create a www server in AWS
@@ -40,9 +40,9 @@ Options:
                         itNote: you still need the correct creds in your creds
                         file since this script does some aws searching to find
                         the latest IP
+```
 
-*****
-Requirements
+##Requirements
 *****
 
 A couple of notes:
