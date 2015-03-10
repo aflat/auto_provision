@@ -427,9 +427,9 @@ aws.ModifyRouteTable()
 aws.ModifySecurityGroup()
 #There isn't much of a way to make sure the OS is running(since the aws class already knows it's in a running state),
 #so I'm coping out and sleeping, 60 seconds might be long, but it's 
-logger.info("Going to wait 60 seconds for the OS in the instance to start up")
+logging.info("Going to wait 60 seconds for the OS in the instance to start up")
 for x in range(1,7):
-	logger.info("I'm not hung, sleep cycle(10 seconds each) " + str(x) + " of 6")
+	logging.info("I'm not hung, sleep cycle(10 seconds each) " + str(x) + " of 6")
 	time.sleep(10)
 
 InstallSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() )
