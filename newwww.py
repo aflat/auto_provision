@@ -7,9 +7,7 @@ import ConfigParser
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/pexpect_u-2.5-py3.2.egg")
 import pexpect
 
-sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)) + "/boto")
-import boto.ec2
-from boto.vpc import VPCConnection
+
 
 import datetime
 import urllib
@@ -37,6 +35,15 @@ def runCommand(cmd, workingDir="./"):
 	process.wait()
 	logging.debug("Command ran, and returned error code: " + str(process.returncode) + "\n")
 	return popenOut, process.returncode
+
+######Import the aws boto package, 
+if(not os.path.isfile(os.path.dirname(os.path.realpath(__file__)) + "/boto/setup.py")):
+	cmd = ['git', 'submodule', 'update', '--init', '--recursive']
+	gitOut, returnCode = runCommand(cmd, "./")
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)) + "/boto")
+import boto.ec2
+from boto.vpc import VPCConnection
+
 #################################################################################################
 ##
 ##	function: InstallSalt
@@ -369,7 +376,14 @@ class AWS(object):
 		print self.runningInstance.instances[0].__doc__
 		return self.runningInstance.instances[0].state
 
-
+#################################################################################################
+##
+##	function: TestURL
+##	purpose: tests the url to make sure we get a 200 response
+##	parameters: url: string - the full url to get, including the http://
+##	returns: 0 on success, 1 on failure
+##
+#################################################################################################
 def TestURL(url):
 	logging.info("Testing url: " + url + " please wait....")
 	if (urllib.urlopen(url).getcode() == 200):
