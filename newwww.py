@@ -137,6 +137,9 @@ class AWS(object):
 	instanceTagName = "ec2_newwww_tag"
 	
 	def __init__(self, credsFilename):
+		if( not os.path.isfile(credsFilename) ):
+			logging.error("Error: creds file"+credsFilename+ "is missing!!!! exiting ")
+			exit(1)
 		config = ConfigParser.RawConfigParser()
 		config.read(credsFilename)
 		self.awsID = config.get('CredentialsSection', 'AWS_ACCESS_KEY_ID')
