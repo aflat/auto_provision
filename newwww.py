@@ -398,13 +398,13 @@ def TestURL(url):
 
 parser = optparse.OptionParser(description='Create a www server in AWS')
 parser.add_option('--creds', '--c' ,  dest='credsFile',default="aws.creds",
-	help='a file containing your aws credentials file, if not supplied it looks for aws.creds')
+	help='A file containing your aws credentials file, if not supplied it looks for aws.creds')
 parser.add_option('--pemfile', '--p' ,  dest='pemName',default="ec2-newwww-key.pem",
-	help="the path to the pem file used to use to connect to the instance, the name in aws,"+
+	help="The path to the pem file used to use to connect to the instance, the name in aws,"+
 			"and the local .pem file must have the same name, defaults to ec2-newwww-key.pem. " +
-			"This program will create the key if it doesn't exist")
+			"This program will create the key if it doesn't exist\n")
 parser.add_option('--testonly', '--test' , action="store_true", dest='testOnly',default=False,
-	help="run the test of the url, the script determines the IP of the latest instance that was created and tests it"+
+	help="Run the test of the url, the script determines the IP of the latest instance that was created and tests it"+
 			"Note: you still need the correct creds in your creds file since this script does some aws searching to find the latest IP")
 
 

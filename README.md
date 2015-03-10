@@ -2,7 +2,6 @@
 
 
 ##Usage
-******
 
 You can use 
 ```
@@ -14,7 +13,6 @@ git submodule update --init --recursive
 ```
 
 ##Running the script
-*****
 
 ```
 newwww.py --help
@@ -43,7 +41,6 @@ Options:
 ```
 
 ##Requirements
-*****
 
 A couple of notes:
 
