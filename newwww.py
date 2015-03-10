@@ -11,6 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)) + "/boto")
 import boto.ec2
 from boto.vpc import VPCConnection
 
+import datetime
+import urllib
 import os.path
 import string
 import subprocess
@@ -119,11 +121,13 @@ class AWS(object):
 	vpc = None
 	subnet = None
 	subnetAddressRange = "10.10.0.0/24"
-	ec2KeyName = "ec2-newwww-key"
+	ec2KeyName = None
 	gateway = None
 	elasticIP = None
 	runningInstance = None
 	routeTable = None
+	ec2KeyPath = None
+	instanceTagName = "ec2_newwww_tag"
 	
 	def __init__(self, credsFilename):
 		config = ConfigParser.RawConfigParser()
@@ -257,7 +261,7 @@ class AWS(object):
 		if(self.vpc == None):
 			self.CreateVPC()
 		
-		if( not os.path.isfile(self.ec2KeyName + ".pem")): 
+		if( not os.path.isfile(self.ec2KeyPath)): 
 			logging.debug("need to create the the keypair: " + self.ec2KeyName)
 			key_pair = self.ec2.create_key_pair(self.ec2KeyName)
 			key_pair.save('./')
@@ -269,13 +273,45 @@ class AWS(object):
 										#security_group_ids=['sg-dfa62ebb'],
 										subnet_id=self.subnet.id
 										)
-		#make sure you sleep before associating the IP, AWS can fail if you don't, 60 seconds might be too long, but it's a safe number
-		time.sleep(60)
+		#make sure you sleep before associating the IP, AWS can fail if you don't
+		instanceStatus = self.runningInstance.instances[0].update()
+		while instanceStatus == 'pending':
+			logging.info("Instance is still pending, waiting for it to move on from that state...")
+			time.sleep(10)
+			instanceStatus = self.runningInstance.instances[0].update()
+		#make sure you wait before associating the IP, AWS can fail if you don't
+		instanceStatus = self.runningInstance.instances[0].update()
+		while instanceStatus != 'running':
+			logging.info("Instance is not in a running state, waiting for it...")
+			time.sleep(10)
+			instanceStatus = self.runningInstance.instances[0].update()
 
+		self.ec2.create_tags(resource_ids=[self.runningInstance.instances[0].id], tags={"Name": self.instanceTagName,
+																	"EpochDateCreated":str(time.time())})   
 		#cheating since I only create 1 instance, I know it's [0]
 		self.ec2.associate_address(allocation_id=self.elasticIP.allocation_id, instance_id=self.runningInstance.instances[0].id,public_ip=self.elasticIP.public_ip)
-		#return self.elasticIP.public_ip
 		return self.runningInstance
+	#################################################################################################
+	##
+	##	function: FindLatestInstance
+	##	purpose: finds the latest instance which contains the name self.instanceTagName
+	##	parameters: none
+	##	returns: the public IP of the (hopefully) running instance
+	##
+	#################################################################################################
+	def FindLatestInstance(self):
+
+		allInstances = self.ec2.get_only_instances(filters={'tag:Name':[self.instanceTagName]})
+		if(allInstances == None):
+			logging.error("Failed to get any instance with a tag Name of: " + self.instanceTagName + " I can't run a test")
+			return 1
+
+		latestReservation = [allInstances[0].id,allInstances[0].tags["EpochDateCreated"],allInstances[0].ip_address]
+		for singleInstance in allInstances:
+			if(singleInstance.tags["EpochDateCreated"] > latestReservation[1]):
+				latestReservation = [singleInstance.id, singleInstance.tags["EpochDateCreated"],singleInstance.ip_address]
+		return latestReservation[2]
+
 	#################################################################################################
 	##
 	##	function: GetCreds
@@ -296,8 +332,7 @@ class AWS(object):
 	##
 	#################################################################################################
 	def GetPemKeyFileName(self):
-		return self.ec2KeyName
-
+		return self.ec2KeyPath
 	#################################################################################################
 	##
 	##	function: GetPublicIP
@@ -308,6 +343,18 @@ class AWS(object):
 	#################################################################################################
 	def GetPublicIP(self):
 		return self.elasticIP.public_ip
+	#################################################################################################
+	##
+	##	function: SetKeyName
+	##	purpose: sets the keyname we are going to use to connect to the instance with, 
+	##	parameters: none
+	##	returns: 
+	##
+	#################################################################################################
+	def SetKeyNameAndPath(self, keyPath="ec2-newwww-key.pem"):
+		self.ec2KeyName = os.path.splitext( os.path.basename(keyPath))[0]
+		self.ec2KeyPath = keyPath
+		
 	#################################################################################################
 	##
 	##	function: CheckInstanceStatus
@@ -323,23 +370,54 @@ class AWS(object):
 		return self.runningInstance.instances[0].state
 
 
+def TestURL(url):
+	logging.info("Testing url: " + url + " please wait....")
+	if (urllib.urlopen(url).getcode() == 200):
+		logging.info("URL: " + url + " is up and running, feel free to visit")
+		return 0
+	logging.error("URL: " + url + " is NOT up there was an error somewhere")
+	return 1
 
 
 parser = optparse.OptionParser(description='Create a www server in AWS')
 parser.add_option('--creds', '--c' ,  dest='credsFile',default="aws.creds",
 	help='a file containing your aws credentials file, if not supplied it looks for aws.creds')
+parser.add_option('--pemfile', '--p' ,  dest='pemName',default="ec2-newwww-key.pem",
+	help="the path to the pem file used to use to connect to the instance, the name in aws,"+
+			"and the local .pem file must have the same name, defaults to ec2-newwww-key.pem. " +
+			"This program will create the key if it doesn't exist")
+parser.add_option('--testonly', '--test' , action="store_true", dest='testOnly',default=False,
+	help="run the test of the url, the script determines the IP of the latest instance that was created and tests it"+
+			"Note: you still need the correct creds in your creds file since this script does some aws searching to find the latest IP")
+
 
 options, args = parser.parse_args()
 
+
+
+
+
 aws = AWS(options.credsFile)
+if (options.testOnly == True):
+	logging.info("Running test only...")
+	latestIp = aws.FindLatestInstance()
+	if(TestURL("http://" + latestIp) == 0):
+		logging.info("Testing passed!")
+		exit(0)
+	logging.error("Error: Testing failed!")
+	exit(1)
+
+aws.SetKeyNameAndPath(options.pemName)
 runningInstance = aws.RunInstance()
 aws.ModifyRouteTable()
 aws.ModifySecurityGroup()
-#I really need to check the status rather then sleeping, but it will work for now
+#There isn't much of a way to make sure the OS is running(since the aws class already knows it's in a running state),
+#so I'm coping out and sleeping, 60 seconds might be long, but it's safe
 time.sleep(60)
 
-InstallSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
-ConfigureSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
-RunSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() + ".pem")
+InstallSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() )
+ConfigureSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName() )
+RunSalt(aws.GetPublicIP(),"ec2-user",aws.GetPemKeyFileName())
 
-logging.info("You can find the page at http://"+aws.GetPublicIP())
+TestURL("http://"+aws.GetPublicIP())
+
