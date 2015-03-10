@@ -47,10 +47,11 @@ A couple of notes:
 1. I have only tested on python 2.7, but in theory it should work in 3.3
 
 2. You need a creds file, with the following contents:
-
+```
 [CredentialsSection]
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
+```
 
 3. If you have an existing .pem key, you can supply it, and the script will attempt to use it, but the key pair in aws must have the same name as the .pem(not counting the .pem extension) eg:
 ```
